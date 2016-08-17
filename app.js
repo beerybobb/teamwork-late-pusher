@@ -7,6 +7,7 @@ var creds = {
 
 
 
+
 //Teamwork needs the date to be in a specific format. the below gets them. 
 var today = new Date();
 var dd = today.getDate();
@@ -38,11 +39,13 @@ var responsible;
 var responsibleId;
 var person;
 var lateIds = [];
+var isSubtask;
+var parentId;
 
 function lateCheck() {
     $.ajax({
             type: "GET",
-            url: "https://"+ creds.company +".teamwork.com/tasks.json",
+            url: "https://" + creds.company + ".teamwork.com/tasks.json",
             headers: { "Authorization": "Basic " + btoa(creds.token + ':fakepass') },
             success: function(res) {
                 console.log('got json task list');
@@ -56,7 +59,7 @@ function lateCheck() {
                     for (var i = 0; i < tasks['todo-items'].length; i++) {
                         (function(i) {
                             //figure out if current task is late PLUS is not the root cause of lateness(is not a dependant task)
-                            if (tasks['todo-items'][i]['due-date'] < todaysDate && tasks['todo-items'][i]['has-predecessors'] == 0 ) {
+                            if (tasks['todo-items'][i]['due-date'] < todaysDate && tasks['todo-items'][i]['has-predecessors'] == 0) {
                                 //push the late tasks into a list. may use this in the future
                                 lateIds.push(tasks['todo-items'][i]['id'])
                                     //set var for current iterations due date
@@ -69,17 +72,22 @@ function lateCheck() {
                                     responsible = tasks['todo-items'][i]['responsible-party-firstname'];
                                     responsibleId = tasks['todo-items'][i]['responsible-party-id']
                                 }
+                                if (tasks['todo-items'][i]['parent-task']) {
+                                    isSubtask = true;
+                                    console.log(isSubtask);
+                                    parentId = tasks['todo-items'][i]['parent-task'].id
+                                }
 
 
                                 //write template to page
-                                document.getElementById('lateTask').innerHTML += '<div class="demo-card-square mdl-card mdl-shadow--2dp containerNum' + i + '"><div class="mdl-card__title mdl-card--expand"><h4 class="mdl-card__title-text">' + tasks['todo-items'][i].content + '</h4></div><div class="mdl-card__supporting-text"><div class="offender" style="text-align:center"><img alt="' + responsibleId + '" src="" /><br><span>Offender: ' + responsible + '</span></div><div class="due" alt="' + dueDate + '">Due date: ' + yyyymmddConvert(dueDate) + '</div></div><div class="mdl-card__actions mdl-card--border" style="text-align: center;"><a class="mdl-button mdl-button--colored mdl-js-button mdl-js-ripple-effect push-task taskNum' + i + '" href="javascript:void(0)">Push Task</a></div></div>'
+                                document.getElementById('lateTask').innerHTML += '<div class="demo-card-square mdl-card mdl-shadow--2dp containerNum' + i + '"><div class="mdl-card__title mdl-card--expand"><h4 class="mdl-card__title-text">' + tasks['todo-items'][i].content + '</h4></div><div class="mdl-card__supporting-text"><div class="offender" style="text-align:center"><img alt="' + responsibleId + '" src="https://hooklogic.teamwork.com/images/noPhoto2.png" /><br><span>Offender: ' + responsible + '</span></div><div class="due" alt="' + dueDate + '">Due date: ' + yyyymmddConvert(dueDate) + '</div></div><div class="mdl-card__actions mdl-card--border" style="text-align: center;"><a class="mdl-button mdl-button--colored mdl-js-button mdl-js-ripple-effect push-task taskNum' + i + '" href="javascript:void(0)">Push Task</a></div></div>'
 
 
                                 //get offending parties pic. probably wont need this either
                                 $.ajax({
                                     type: "GET",
-                                    url: "https://"+ creds.company +".teamwork.com/people/" + responsibleId + ".json",
-                                    headers: { "Authorization": "Basic " + btoa(creds.token +':fakepass') },
+                                    url: "https://" + creds.company + ".teamwork.com/people/" + responsibleId + ".json",
+                                    headers: { "Authorization": "Basic " + btoa(creds.token + ':fakepass') },
                                     success: function(res) {
                                         person = res;
                                     }
@@ -89,28 +97,42 @@ function lateCheck() {
                                 }).then(function() {
                                     //add event handeler to preform date push and comment on click.
                                     $('.taskNum' + i).on('click', function() {
+                                        $.ajax({
+                                            type: "PUT",
+                                            url: "https://" + creds.company + ".teamwork.com/tasks/" + tasks['todo-items'][i]['id'] + ".json",
+                                            headers: { "Authorization": "Basic " + btoa(creds.token + ':fakepass') },
+                                            contentType: "application/json; charset=UTF-8",
+                                            data: JSON.stringify({ "todo-item": { "due-date": tomorrowsDate } }),
+                                            success: function(mess) { console.log('success' + JSON.stringify(mess)) },
+                                        }).then(function() {
                                             $.ajax({
-                                                type: "PUT",
-                                                url: "https://"+ creds.company +".teamwork.com/tasks/" + tasks['todo-items'][i]['id'] + ".json",
+                                                type: "POST",
+                                                url: "https://" + creds.company + ".teamwork.com/tasks/" + tasks['todo-items'][i]['id'] + "/comments.json",
                                                 headers: { "Authorization": "Basic " + btoa(creds.token + ':fakepass') },
                                                 contentType: "application/json; charset=UTF-8",
-                                                data: JSON.stringify({ "todo-item": { "due-date": tomorrowsDate } }),
+                                                data: JSON.stringify({ "comment": { "body": "This task was found to be past due and was moved to tomorrow. Please re-estimate the task's due date when you have a chance. I also think you're awesome :)", "content-type": "TEXT" } }),
                                                 success: function(mess) { console.log('success' + JSON.stringify(mess)) },
-                                            }).then(function() {
+                                            });
+                                        }).then(function() {
+                                            //may duplicate post on parent task if there are multiple late subtasks. or maybe it wont leave a comment...hmmm
+                                            if (isSubtask) {
                                                 $.ajax({
-                                                    type: "POST",
-                                                    url: "https://"+ creds.company +".teamwork.com/tasks/" + tasks['todo-items'][i]['id'] + "/comments.json",
-                                                    headers: { "Authorization": "Basic " + btoa(creds.token +':fakepass') },
+                                                    type: "PUT",
+                                                    url: "https://" + creds.company + ".teamwork.com/tasks/" + parentId + ".json",
+                                                    headers: { "Authorization": "Basic " + btoa(creds.token + ':fakepass') },
                                                     contentType: "application/json; charset=UTF-8",
-                                                    data: JSON.stringify({ "comment": { "body": "This task was found to be past due and was moved to tomorrow. Please re-estimate the task's due date when you have a chance. I also think you're awesome :)", "content-type": "TEXT" } }),
+                                                    data: JSON.stringify({ "todo-item": { "due-date": tomorrowsDate } }),
                                                     success: function(mess) { console.log('success' + JSON.stringify(mess)) },
-                                                });
-                                            }).then(function() {
-                                            	//remove this card when done
-                                                $('.containerNum' + i).fadeOut(function() { $('.containerNum' + i).remove();
-                                                    update() });
-                                            })
+                                                })
+                                            }
+                                        }).then(function() {
+                                            //remove this card when done
+                                            $('.containerNum' + i).fadeOut(function() {
+                                                $('.containerNum' + i).remove();
+                                                update()
+                                            });
                                         })
+                                    })
                                 })
                             } //late tasks
                         })(i); //iffy
@@ -122,9 +144,9 @@ function lateCheck() {
 
 //update - clear and fade - refresh
 function update() {
-    $("#lateTask").fadeOut(function() {
+    $("#lateTask").fadeOut('fast',function() {
         $("#lateTask").empty();
-        $("#lateTask").fadeIn();
+        $("#lateTask").fadeIn('fast');
         lateCheck()
     });
 };
